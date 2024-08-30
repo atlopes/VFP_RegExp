@@ -32,6 +32,7 @@ Refer to the respective documentation for those marked as `VBS` or `PCRE`.
 |Global|VBS|L| |
 |Groups|VFP|N|The number of capturing groups in a regular expression.|
 |IgnoreCase|VBS|L| |
+|MatchCollectionBaseClass|VFP|C|The base class of the RegExp collections, either "Custom" or "Collection"|
 |Multiline|VBS|L| |
 |NormalizeCRLF|VFP|L|Normalize newlines in a subject string changing them from LF or CR to CR+LF, before matching.|
 |RegExpEngine|VFP|C|Name and version of the PCRE2 library.|
@@ -105,6 +106,31 @@ WITH CREATEOBJECT("VFP_RegExp") AS VFP_RegExp
 	ENDWITH
 ENDWITH
 ```
+
+It's possible to base the RegExp collection classes (`RegExp_MatchCollection` and `RegExp_SubMatchCollection`) on the VFP `Collection` object instead of `Custom`. This will lead to three differences in how the results are treated: references to the member of the collections are 1-based; the `Item()` method can be chained; and the collections can be iterated through their members.
+
+```foxpro
+LOCAL RX AS VFP_RegExp
+LOCAL Matches AS RegExp_MatchCollection	&& or RegExp_MatchCollection2
+
+m.RX = CREATEOBJECT("VFP_RegExp")
+
+m.RX.MatchCollectionBaseClass = "Collection"
+m.RX.Global = .T.
+
+m.RX.Pattern = "([A-Z])\w+"
+
+m.Matches = m.RX.Execute("the quick brown Fox jumps over a lazy Dog")
+
+FOR EACH m.Match AS RegExp_Match IN m.Matches
+
+	? m.Match.Value
+	? m.Match.SubMatches.Item(1).Value
+
+ENDFOR
+```
+
+## Dependencies
 
 The class requires a PCRE2 8-bit DLL (where 8-bit refers to the size of a character). For convenience, an already-built DLL is available in the source folder, but you can use any other that may be present in your system. Before use, read the accompanying license document.
 

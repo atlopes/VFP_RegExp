@@ -56,8 +56,9 @@ CREATEOBJECT("RegExp_Library")
 
 DEFINE CLASS VFP_RegExp AS Custom
 
-	Version = 1.00
+	Version = 1.01
 	RegExpEngine = ""
+	MatchCollectionBaseClass = "Custom"
 
 	* VBScript-like properties
 	Global = .F.
@@ -86,6 +87,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 						"<memberdata name='groups' display='Groups' type='property'/>" + ;
 						"<memberdata name='ignorecase' display='IgnoreCase' type='property'/>" + ;
 						"<memberdata name='multiline' display='Multiline' type='property'/>" + ;
+						"<memberdata name='matchcollectionbaseclass' display='MatchCollectionBaseClass' type='property'/>" + ;
 						"<memberdata name='normalizecrlf' display='NormalizeCRLF' type='property'/>" + ;
 						"<memberdata name='regexpengine' display='RegExpEngine' type='property'/>" + ;
 						"<memberdata name='pattern' display='Pattern' type='property'/>" + ;
@@ -122,7 +124,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 	* Test: returns true if the subject string (at least, partially) matches the pattern.
 
-	FUNCTION Test (SubjectString AS String) AS MatchCollection
+	FUNCTION Test (SubjectString AS String) AS Object
 
 		IF This.NormalizeCRLF
 			RETURN This.RegExpOp(VFP_REG_TEST, This.Normalizer(m.SubjectString))
@@ -134,7 +136,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 	* Execute: returns a collection of RegExp_Match objects (number of matches in RegExp_MatchColletion.Count).
 
-	FUNCTION Execute (SubjectString AS String) AS MatchCollection
+	FUNCTION Execute (SubjectString AS String) AS Object
 
 		IF This.NormalizeCRLF
 			RETURN This.RegExpOp(VFP_REG_EXEC, This.Normalizer(m.SubjectString))
@@ -171,6 +173,8 @@ DEFINE CLASS VFP_RegExp AS Custom
 		LOCAL ResultCode AS Integer
 
 		LOCAL SafetyValve AS Integer
+
+		LOCAL Ops AS Exception
 
 		* method results
 		LOCAL Matched AS Logical
@@ -212,7 +216,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 				* prepare the collection of matches
 				IF m.Operation != VFP_REG_TEST
-					m.RunningMatches = CREATEOBJECT("RegExp_MatchCollection")
+					m.RunningMatches = CREATEOBJECT(IIF(This.MatchCollectionBaseClass == "Collection", "RegExp_MatchCollection2", "RegExp_MatchCollection"))
 				ENDIF
 
 				* prepare the structure that will store info on matches on the PCRE2 side
@@ -256,28 +260,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 						ENDIF
 
 						* store the info on the first match, overall string
-						m.Match = m.RunningMatches.MatchFound(m.StartMatch, ;
-																m.EndMatch - m.StartMatch, ;
-																SUBSTR(m.SubjectString, m.StartMatch + 1, m.EndMatch - m.StartMatch))
-
-						* as well as the info on sub-matches (capture groups)
-						FOR m.Group = 1 TO m.ResultCode - 1
-
-							m.StartMatch = This.ReadInt(m.MatchVector + 8 * m.Group)
-							m.EndMatch = This.ReadInt(m.MatchVector + 8 * m.Group + 4)
-
-							* info on substrings is always stored
-							IF m.StartMatch != -1
-								m.Match.SubMatches.MatchFound(m.Group, ;
-																m.StartMatch, ;
-																m.EndMatch - m.StartMatch, ;
-																SUBSTR(m.SubjectString, m.StartMatch + 1, m.EndMatch - m.StartMatch))
-							ELSE
-								* even if there is no match
-								m.Match.SubMatches.MatchNotFound(m.Group)
-							ENDIF
-
-						ENDFOR
+						m.Match = This.MatchRecorder(m.RunningMatches, m.SubjectString, m.MatchVector, m.ResultCode)
 
 						* to-do: query the library, instead, but this will work, for now
 						This.Groups = MAX(This.Groups, m.ResultCode)
@@ -351,36 +334,12 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 								* break with any error other than no match
 								IF m.ResultCode < PCRE2_NO_ERROR
-									m.ErrorCode = m.ResultCode
+									This.RegExpError = m.ResultCode
 									EXIT
 								ENDIF
 
-								* we have a new match, proceed as above
-								m.StartMatch = This.ReadInt(m.MatchVector)
-								m.EndMatch = This.ReadInt(m.MatchVector + 4)
-
-								m.Match = m.RunningMatches.MatchFound(m.StartMatch, ;
-																		m.EndMatch - m.StartMatch, ;
-																		SUBSTR(m.SubjectString, m.StartMatch + 1, m.EndMatch - m.StartMatch))
-
-								FOR m.Group = 1 TO m.ResultCode - 1
-
-									m.StartMatch = This.ReadInt(m.MatchVector + 8 * m.Group)
-									m.EndMatch = This.ReadInt(m.MatchVector + 8 * m.Group + 4)
-
-									IF m.StartMatch != -1
-										m.Match.SubMatches.MatchFound(m.Group, ;
-																		m.StartMatch, ;
-																		m.EndMatch - m.StartMatch, ;
-																		SUBSTR(m.SubjectString, m.StartMatch + 1, m.EndMatch - m.StartMatch))
-									ELSE
-										m.Match.SubMatches.MatchNotFound(m.Group)
-									ENDIF
-
-								ENDFOR
-
-								* normally, this isn't required, at this point: to-do, remove it
-								This.Groups = MAX(This.Groups, m.ResultCode)
+								* we have a new match, record it as above
+								m.Match = This.MatchRecorder(m.RunningMatches, m.SubjectString, m.MatchVector, m.ResultCode)
 
 								IF m.Operation == VFP_REG_REPLACE
 									m.Replaced = This.Replacer(m.Replaced, m.Replacement, m.Match)
@@ -402,15 +361,17 @@ DEFINE CLASS VFP_RegExp AS Custom
 			ENDIF
 	
 			* report error
-			IF m.ErrorCode != PCRE2_NO_ERROR
+			IF This.RegExpError != PCRE2_NO_ERROR
 				m.ErrorMessage = SPACE(256)
-				pcre2_GetErrorMessage(m.ErrorCode, @m.ErrorMessage, LEN(m.ErrorMessage) - 1)
-				This.RegExpError = m.ErrorCode
+				pcre2_GetErrorMessage(This.RegExpError, @m.ErrorMessage, LEN(m.ErrorMessage) - 1)
 				This.RegExpErrorMessage = STREXTRACT(m.ErrorMessage, "", 0h00, 1, 2)
 				This.RegExpErrorLocation = SUBSTR(This.Pattern, m.ErrorOffset + 1)
 			ENDIF
 
-		CATCH
+		CATCH TO m.Ops
+
+			* something went wrong
+			SET STEP ON
 			
 		FINALLY
 
@@ -488,6 +449,37 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 	ENDFUNC
 
+	* record a match and submatches
+	HIDDEN FUNCTION MatchRecorder (Matches AS RegExp_MatchCollection, Subject AS String, Vector AS Integer, Groups AS Integer) AS RegExp_Match
+
+		LOCAL Match AS RegExp_Match
+		LOCAL Start AS Integer, End AS Integer
+		LOCAL Group AS Integer
+
+		* the overall match
+		m.Start = This.ReadInt(m.Vector)
+		m.End = This.ReadInt(m.Vector + 4)
+
+		m.Match = m.Matches.MatchFound(m.Start, m.End - m.Start, SUBSTR(m.Subject, m.Start + 1, m.End - m.Start))
+
+		* info on capture groups (if any)
+		FOR m.Group = 1 TO m.Groups - 1
+
+			m.Start = This.ReadInt(m.Vector + 8 * m.Group)
+			m.End = This.ReadInt(m.Vector + 8 * m.Group + 4)
+
+			IF m.Start != -1
+				m.Match.SubMatches.MatchFound(m.Group, m.Start, m.End - m.Start, SUBSTR(m.Subject, m.Start + 1, m.End - m.Start))
+			ELSE
+				m.Match.SubMatches.MatchNotFound(m.Group)
+			ENDIF
+
+		ENDFOR
+
+		RETURN m.Match
+
+	ENDFUNC
+
 	* make all newlines like CRLF, if there is no CRLF in the subject string
 	HIDDEN FUNCTION Normalizer (Source AS String) AS String
 
@@ -546,16 +538,17 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 ENDDEFINE
 
-* a collection of matches
+* a collection of matches (BaseClass == "Custom")
 
 DEFINE CLASS Regexp_MatchCollection AS Custom
 
 	Count = 0
+
+	HIDDEN Matches[1]
 	DIMENSION Matches[1]
 
 	_MemberData = "<VFPData>" + ;
 						"<memberdata name='count' display='Count' type='property'/>" + ;
-						"<memberdata name='matches' display='Matches' type='property'/>" + ;
 						;
 						"<memberdata name='item' display='Item' type='method'/>" + ;
 						"</VFPData>"
@@ -600,6 +593,33 @@ DEFINE CLASS Regexp_MatchCollection AS Custom
 
 ENDDEFINE
 
+* a collection of matches (BaseClass == "Collection")
+
+DEFINE CLASS Regexp_MatchCollection2 AS Collection
+
+	* (part of the) subject string has matched
+	FUNCTION MatchFound (FirstIndex AS Integer, Length AS Integer, Value AS String) AS RegExp_Match
+
+		LOCAL Match AS RegExp_Match
+
+		m.Match = CREATEOBJECT("RegExp_Match", .T.)
+
+		WITH m.Match AS RegExp_Match
+
+			.FirstIndex = m.FirstIndex
+			.Length = m.Length
+			.Value = m.Value
+
+		ENDWITH
+
+		This.Add(m.Match)
+
+		RETURN m.Match
+
+	ENDFUNC
+
+ENDDEFINE
+
 * a match
 
 DEFINE CLASS RegExp_Match AS Custom
@@ -616,34 +636,36 @@ DEFINE CLASS RegExp_Match AS Custom
 						"<memberdata name='value' display='Value' type='property'/>" + ;
 						"</VFPData>"
 
-	PROCEDURE Init
-		This.SubMatches = CREATEOBJECT("RegExp_SubMatchCollection")
+	PROCEDURE Init (BaseClassIsCollection AS Logical)
+		This.SubMatches = CREATEOBJECT(IIF(m.BaseClassIsCollection, "RegExp_SubMatchCollection2", "RegExp_SubMatchCollection"))
 	ENDPROC
 
 ENDDEFINE
 
-* a collection of submatches
+* a collection of submatches (BaseClass == "Custom")
 
-DEFINE CLASS Regexp_SubMatchCollection AS Custom
+DEFINE CLASS RegExp_SubMatchCollection AS Custom
 
 	Count = 0
-	DIMENSION Matches[1]
+
+	HIDDEN SubMatches[1]
+	DIMENSION SubMatches[1]
 
 	_MemberData = "<VFPData>" + ;
 						"<memberdata name='count' display='Count' type='property'/>" + ;
-						"<memberdata name='matches' display='Matches' type='property'/>" + ;
+						;
 						"<memberdata name='item' display='Item' type='method'/>" + ;
 						"</VFPData>"
 
 	FUNCTION Init
-		This.Matches[1] = .NULL.
+		This.SubMatches[1] = .NULL.
 	ENDFUNC
 
 	* as in VBScript, index is 0-based
 	FUNCTION Item (matchIndex AS Integer) AS String
 
 		IF BETWEEN(m.matchIndex, 0, This.Count - 1)
-			RETURN This.Matches[m.matchIndex + 1].Value
+			RETURN This.SubMatches[m.matchIndex + 1].Value
 		ELSE
 			RETURN .NULL.
 		ENDIF
@@ -653,11 +675,11 @@ DEFINE CLASS Regexp_SubMatchCollection AS Custom
 	* (part of the) subject string has matched, as result of a capture group
 	FUNCTION MatchFound (Group AS Integer, FirstIndex AS Integer, Length AS Integer, Value AS String) AS RegExp_SubMatch
 
-		LOCAL Match AS RegExp_SubMatch
+		LOCAL SubMatch AS RegExp_SubMatch
 
-		m.Match = CREATEOBJECT("RegExp_SubMatch")
+		m.SubMatch = CREATEOBJECT("RegExp_SubMatch")
 
-		WITH m.Match
+		WITH m.SubMatch
 
 			.Group = m.Group
 			.FirstIndex = m.FirstIndex
@@ -667,36 +689,53 @@ DEFINE CLASS Regexp_SubMatchCollection AS Custom
 		ENDWITH
 
 		This.Count = This.Count + 1
-		DIMENSION This.Matches[This.Count]
+		DIMENSION This.SubMatches[This.Count]
 
-		This.Matches[This.Count] = m.Match
+		This.SubMatches[This.Count] = m.SubMatch
 
-		RETURN m.Match
+		RETURN m.SubMatch
 
 	ENDFUNC
 
 	* no match for a specific capture group
 	FUNCTION MatchNotFound (Group AS Integer) AS RegExp_SubMatch
 
+		RETURN This.MatchFound(m.Group, .NULL., .NULL., .NULL.)
+
+	ENDFUNC
+
+ENDDEFINE
+
+* a collection of submatches (BaseClass == "Collection")
+
+DEFINE CLASS RegExp_SubMatchCollection2 AS Collection
+
+	* (part of the) subject string has matched, as result of a capture group
+	FUNCTION MatchFound (Group AS Integer, FirstIndex AS Integer, Length AS Integer, Value AS String) AS RegExp_SubMatch
+
 		LOCAL Match AS RegExp_SubMatch
 
-		m.Match = CREATEOBJECT("RegExp_SubMatch")
+		m.SubMatch = CREATEOBJECT("RegExp_SubMatch")
 
-		WITH m.Match
+		WITH m.SubMatch
 
 			.Group = m.Group
-			.FirstIndex = .NULL.
-			.Length = .NULL.
-			.Value = .NULL.
+			.FirstIndex = m.FirstIndex
+			.Length = m.Length
+			.Value = m.Value
 
 		ENDWITH
 
-		This.Count = This.Count + 1
-		DIMENSION This.Matches[This.Count]
+		This.Add(m.SubMatch)
 
-		This.Matches[This.Count] = m.Match
+		RETURN m.SubMatch
 
-		RETURN m.Match
+	ENDFUNC
+
+	* no match for a specific capture group
+	FUNCTION MatchNotFound (Group AS Integer) AS RegExp_SubMatch
+
+		RETURN This.MatchFound(m.Group, .NULL., .NULL., .NULL.)
 
 	ENDFUNC
 
