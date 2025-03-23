@@ -11,9 +11,10 @@
 
 * some PCRE2 related definitions
 
-* configuration queries
+* configuration and information queries
 
 #DEFINE PCRE2_CONFIG_VERSION		11
+#DEFINE PCRE2_INFO_CAPTURECOUNT	4
 
 * error codes
 
@@ -38,6 +39,7 @@
 #DEFINE VFP_REG_TEST			0
 #DEFINE VFP_REG_EXEC			1
 #DEFINE VFP_REG_REPLACE		2
+#DEFINE VFP_REG_VALIDATE	3
 
 #DEFINE AS_DWORD				"4RS"
 
@@ -56,7 +58,7 @@ CREATEOBJECT("RegExp_Library")
 
 DEFINE CLASS VFP_RegExp AS Custom
 
-	Version = 1.01
+	Version = 1.02
 	RegExpEngine = ""
 	MatchCollectionBaseClass = "Custom"
 
@@ -101,6 +103,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 						"<memberdata name='execute' display='Execute' type='method'/>" + ;
 						"<memberdata name='replace' display='Replace' type='method'/>" + ;
 						"<memberdata name='test' display='Test' type='method'/>" + ;
+						"<memberdata name='validate' display='Validate' type='method'/>" + ;
 						"</VFPData>"
 
 	FUNCTION Init ()
@@ -120,11 +123,11 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 	ENDFUNC
 
-	* Perform the actual operation (Test, Execute, or Replace).
+	* Perform the actual operation (Test, Execute, Replace, or Validate).
 
 	* Test: returns true if the subject string (at least, partially) matches the pattern.
 
-	FUNCTION Test (SubjectString AS String) AS Object
+	FUNCTION Test (SubjectString AS String) AS Logical
 
 		IF This.NormalizeCRLF
 			RETURN This.RegExpOp(VFP_REG_TEST, This.Normalizer(m.SubjectString))
@@ -158,9 +161,17 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 	ENDFUNC
 
+	* Validate: returns true if parsing the pattern does not raise an error.
+
+	FUNCTION Validate () AS Logical
+
+		RETURN This.RegExpOp(VFP_REG_VALIDATE)
+
+	ENDFUNC
+
 	* Execute the pattern against the subject string, optionally replacing matched groups.
 
-	HIDDEN FUNCTION RegExpOp (Operation AS Integer, SubjectString AS String, Replacement AS String) AS ObjectOrString
+	HIDDEN FUNCTION RegExpOp (Operation AS Integer, SubjectString AS String, Replacement AS String) AS ObjectStringOrLogical
 
 		LOCAL PCRE AS Integer
 		LOCAL MatchData AS Integer
@@ -172,6 +183,8 @@ DEFINE CLASS VFP_RegExp AS Custom
 		LOCAL ErrorOffset AS Integer
 		LOCAL ResultCode AS Integer
 
+		LOCAL InfoBuffer AS String
+
 		LOCAL SafetyValve AS Integer
 
 		LOCAL Ops AS Exception
@@ -180,6 +193,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 		LOCAL Matched AS Logical
 		LOCAL Replaced AS String
 		LOCAL RunningMatches AS RegExp_MatchCollection
+		LOCAL Validated AS Logical
 
 		LOCAL Match AS RegExp_Match, SubMatch AS RegExp_SubMatch
 
@@ -212,7 +226,20 @@ DEFINE CLASS VFP_RegExp AS Custom
 			m.PCRE = pcre2_Compile(This.Pattern, LEN(This.Pattern), This.CompileFlags(), @m.ErrorCode, @m.ErrorOffset, 0)
 
 			* if succeded, we now have a pointer to a PCRE control structure
-			IF m.PCRE != 0
+			m.Validated = m.PCRE != 0
+
+			IF ! m.Validated
+				* signal the error, when invalid
+				This.RegExpError = m.ErrorCode
+			ELSE
+				* fetch the number of groups in the pattern, otherwise
+				m.InfoBuffer = REPLICATE(0h00, 4)
+				pcre2_PatternInfo(m.PCRE, PCRE2_INFO_CAPTURECOUNT, @m.InfoBuffer)
+				This.Groups = CTOBIN(m.InfoBuffer, AS_DWORD)
+			ENDIF
+
+			* on success, continue unless we were just validating
+			IF m.Validated AND m.Operation != VFP_REG_VALIDATE
 
 				* prepare the collection of matches
 				IF m.Operation != VFP_REG_TEST
@@ -261,9 +288,6 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 						* store the info on the first match, overall string
 						m.Match = This.MatchRecorder(m.RunningMatches, m.SubjectString, m.MatchVector, m.ResultCode)
-
-						* to-do: query the library, instead, but this will work, for now
-						This.Groups = MAX(This.Groups, m.ResultCode)
 
 						* replace what was matched, if we are in replace mode
 						IF m.Operation == VFP_REG_REPLACE
@@ -392,6 +416,8 @@ DEFINE CLASS VFP_RegExp AS Custom
 			RETURN m.RunningMatches
 		CASE m.Operation == VFP_REG_REPLACE
 			RETURN m.Replaced
+		CASE m.Operation == VFP_REG_VALIDATE
+			RETURN m.Validated
 		OTHERWISE
 			RETURN .NULL.
 		ENDCASE
@@ -776,6 +802,11 @@ DEFINE CLASS RegExp_Library AS Custom
 			INTEGER @ erroroffset, ;
 			LONG context
 
+		DECLARE LONG pcre2_pattern_info_8 IN (m.RegexDLL) AS pcre2_PatternInfo ;
+			LONG code, ;
+			INTEGER what, ;
+			STRING @ where 
+ 
 		DECLARE LONG pcre2_match_data_create_from_pattern_8 IN (m.RegexDLL) AS pcre2_PrepareMatchData ;
 			LONG code, ;
 			LONG gcontext
