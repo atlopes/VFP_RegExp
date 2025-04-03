@@ -15,8 +15,8 @@ Information on the VBScript.RegExp Object:
 - [@ Regular Expressions Info](https://www.regular-expressions.info/vbscript.html)
 
 Information on PCRE and PCRE2 library:
-- [PCRE2 Project](https://github.com/PCRE2Project/pcre2)
-- [Documentation](https://pcre2project.github.io/pcre2/doc/html/index.html)
+- [PCRE2 Project](https://pcre2project.github.io/pcre2/)
+- [Documentation](https://pcre2project.github.io/pcre2/doc/)
 - [@ Regular Expressions Info](https://www.regular-expressions.info/pcre2.html)
 
 ## Properties
@@ -34,6 +34,7 @@ Refer to the respective documentation for those marked as `VBS` or `PCRE`.
 |IgnoreCase|VBS|L| |
 |MatchCollectionBaseClass|VFP|C|The base class of the RegExp collections, either "Custom" or "Collection"|
 |Multiline|VBS|L| |
+|NamedMatches|VFP|O|A collection of named capturing groups.|
 |NormalizeCRLF|VFP|L|Normalize newlines in a subject string changing them from LF or CR to CR+LF, before matching.|
 |RegExpEngine|VFP|C|Name and version of the PCRE2 library.|
 |Pattern|VBS|C| |
@@ -46,11 +47,7 @@ Refer to the respective documentation for those marked as `VBS` or `PCRE`.
 
 ## Methods
 
-The three methods that the class exposes follow those available in VBScript.RegExp:
-
-### `.Test(SubjectString AS String) AS Logical`
-
-Tests a subject string against the pattern and returns `.T.` if it matches, in whole or partially, or `.F.`, otherwise.
+The class exposes three methods that follow those available in VBScript.RegExp (`Execute()`, `Test()`, and `Replace()`), and offers additional ones to deal with extensions to the VBScript model.
 
 ### `.Execute(SubjectString AS String) AS RegExp_MatchCollection`
 
@@ -62,11 +59,29 @@ Every `RegExp_Match` holds a `RegExp_SubMatchesCollection` which, in turn, holds
 
 The properties and methods of these objects are the same as those found in the corresponding objects in VBScript.
 
+In case there are named groups in the pattern string, the `NamedMatches` collection addresses the set of those named groups.
+
+For instance, executing a subject string `"3.14"` against the pattern `"^(?<integer>\d+(?<fractional>\.[\d]+)?)$"` will set a two-member collection, in which `.NamedMatches("integer")` returns `"3"`, `.NamedMatches("fractional")` returns `".14"`, `.NamedMatches.Count` returns `2`, and `.NamedMatches.GetKey(1)` returns `"integer"`.
+
 ### `.Replace(SubjectString AS String, Replacement AS String) AS String`
 
 Replaces a subject string with a replacement string pattern, which may hold references to the capturing groups in the regular expression (as supported by the VBScript object).
 
 For instance, if the regular expression has two sequential capturing groups, the replacement string `"$2$1"` swaps their positions, and the replacement string `"$1"` removes the contents of the second group.
+
+The method can also deal with named groups, referenced as `$<name>`.
+
+### `.Test(SubjectString AS String) AS Logical`
+
+Tests a subject string against the pattern and returns `.T.` if it matches, in whole or partially, or `.F.`, otherwise.
+
+### `.Validate() AS Logical`
+
+Validates the pattern string.
+
+Returns `.T.` if the pattern is valid, `.F.` otherwise.
+
+`.RegExpError*` properties may be used to get additional information in case of error.
 
 ## Using
 
@@ -125,7 +140,7 @@ m.Matches = m.RX.Execute("the quick brown Fox jumps over a lazy Dog")
 FOR EACH m.Match AS RegExp_Match IN m.Matches
 
 	? m.Match.Value
-	? m.Match.SubMatches.Item(1).Value
+	? m.Match.SubMatches.Item(1)
 
 ENDFOR
 ```

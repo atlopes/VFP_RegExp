@@ -15,6 +15,9 @@
 
 #DEFINE PCRE2_CONFIG_VERSION		11
 #DEFINE PCRE2_INFO_CAPTURECOUNT	4
+#DEFINE PCRE2_INFO_NAMECOUNT		17
+#DEFINE PCRE2_INFO_NAMEENTRYSIZE	18
+#DEFINE PCRE2_INFO_NAMETABLE		19
 
 * error codes
 
@@ -42,6 +45,7 @@
 #DEFINE VFP_REG_VALIDATE	3
 
 #DEFINE AS_DWORD				"4RS"
+#DEFINE AS_WORDHL				"2S"
 
 * run this program to put the class in scope
 * and to declare the pcre2_* functions
@@ -58,7 +62,7 @@ CREATEOBJECT("RegExp_Library")
 
 DEFINE CLASS VFP_RegExp AS Custom
 
-	Version = 1.02
+	Version = 1.03
 	RegExpEngine = ""
 	MatchCollectionBaseClass = "Custom"
 
@@ -81,6 +85,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 	NormalizeCRLF = .F.
 
 	Groups = 0
+	ADD OBJECT NamedMatches AS Collection
 
 	_MemberData = "<VFPData>" + ;
 						"<memberdata name='dotall' display='DotAll' type='property'/>" + ;
@@ -90,6 +95,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 						"<memberdata name='ignorecase' display='IgnoreCase' type='property'/>" + ;
 						"<memberdata name='multiline' display='Multiline' type='property'/>" + ;
 						"<memberdata name='matchcollectionbaseclass' display='MatchCollectionBaseClass' type='property'/>" + ;
+						"<memberdata name='namedmatches' display='NamedMatches' type='property'/>" + ;
 						"<memberdata name='normalizecrlf' display='NormalizeCRLF' type='property'/>" + ;
 						"<memberdata name='regexpengine' display='RegExpEngine' type='property'/>" + ;
 						"<memberdata name='pattern' display='Pattern' type='property'/>" + ;
@@ -174,6 +180,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 	HIDDEN FUNCTION RegExpOp (Operation AS Integer, SubjectString AS String, Replacement AS String) AS ObjectStringOrLogical
 
 		LOCAL PCRE AS Integer
+		LOCAL NamedGroups AS Integer, NameTable AS Integer, NameEntrySize AS Integer
 		LOCAL MatchData AS Integer
 		LOCAL MatchVector AS Integer
 		LOCAL MatchOptions AS Integer
@@ -208,13 +215,15 @@ DEFINE CLASS VFP_RegExp AS Custom
 		m.RunningMatches = .NULL.
 		
 		This.Groups = 0
+		m.NamedGroups = 0
+		This.NamedMatches.Remove(-1)
 
 		This.RegExpError = PCRE2_NO_ERROR
 		This.RegExpErrorLocation = ""
 		This.RegExpErrorMessage = ""
 
 		* no allocated structures, for now
-		STORE 0 TO m.PCRE, m.MatchData
+		STORE 0 TO m.PCRE, m.MatchData, m.NameTable
 
 		* let's not run in an infinite loop
 		m.SafetyValve = This.SafetyValve
@@ -236,6 +245,16 @@ DEFINE CLASS VFP_RegExp AS Custom
 				m.InfoBuffer = REPLICATE(0h00, 4)
 				pcre2_PatternInfo(m.PCRE, PCRE2_INFO_CAPTURECOUNT, @m.InfoBuffer)
 				This.Groups = CTOBIN(m.InfoBuffer, AS_DWORD)
+				* and the number of named strings
+				pcre2_PatternInfo(m.PCRE, PCRE2_INFO_NAMECOUNT, @m.InfoBuffer)
+				m.NamedGroups = CTOBIN(m.InfoBuffer, AS_DWORD)
+				* get the table name and entry size, if there are named strings
+				IF m.NamedGroups != 0
+					pcre2_PatternInfo(m.PCRE, PCRE2_INFO_NAMETABLE, @m.InfoBuffer)
+					m.NameTable = CTOBIN(m.InfoBuffer, AS_DWORD)
+					pcre2_PatternInfo(m.PCRE, PCRE2_INFO_NAMEENTRYSIZE, @m.InfoBuffer)
+					m.NameEntrySize = CTOBIN(m.InfoBuffer, AS_DWORD)
+				ENDIF
 			ENDIF
 
 			* on success, continue unless we were just validating
@@ -288,6 +307,11 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 						* store the info on the first match, overall string
 						m.Match = This.MatchRecorder(m.RunningMatches, m.SubjectString, m.MatchVector, m.ResultCode)
+
+						* store the named matches, if any
+						IF m.NamedGroups != 0
+							This.NamedMatchRecorder(m.SubjectString, m.MatchVector, m.NamedGroups, m.NameTable, m.NameEntrySize)
+						ENDIF
 
 						* replace what was matched, if we are in replace mode
 						IF m.Operation == VFP_REG_REPLACE
@@ -365,17 +389,17 @@ DEFINE CLASS VFP_RegExp AS Custom
 								* we have a new match, record it as above
 								m.Match = This.MatchRecorder(m.RunningMatches, m.SubjectString, m.MatchVector, m.ResultCode)
 
+								* store the named matches, if any, as above
+								IF m.NamedGroups != 0
+									This.NamedMatchRecorder(m.SubjectString, m.MatchVector, m.NamedGroups, m.NameTable, m.NameEntrySize)
+								ENDIF
+
 								IF m.Operation == VFP_REG_REPLACE
 									m.Replaced = This.Replacer(m.Replaced, m.Replacement, m.Match)
 								ENDIF
 
 							ENDDO
 
-						ENDIF
-
-						* if in replace mode, get the remaining of the string that didn't match
-						IF m.Operation == VFP_REG_REPLACE
-							m.Replaced = m.Replaced + SUBSTR(m.SubjectString, m.Offset + 1)
 						ENDIF
 
 					ENDCASE
@@ -430,7 +454,9 @@ DEFINE CLASS VFP_RegExp AS Custom
 		LOCAL ScanReplacement AS Integer
 		LOCAL NewReplacedString AS String
 		LOCAL ReplaceChar AS Character
+		LOCAL SubMatch AS String
 		LOCAL Group AS Integer
+		LOCAL NamedGroup AS String
 
 		m.NewReplacedString = m.ReplacedString
 
@@ -439,27 +465,50 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 			m.ReplaceChar = SUBSTR(m.ReplacementString, m.ScanReplacement, 1)
 
-			* reference to groups are made in the form $n
+			* reference to groups are made in the form $n or $<name>
 			IF m.ReplaceChar == "$"
 
 				m.ScanReplacement = m.ScanReplacement + 1
 				m.ReplaceChar = SUBSTR(m.ReplacementString, m.ScanReplacement, 1)
 
-				IF BETWEEN(m.ReplaceChar, "1", "9") OR m.ReplaceChar == "&"
+				DO CASE
+				* $n -> check if group number in range
+				CASE BETWEEN(m.ReplaceChar, "1", "9") OR m.ReplaceChar == "&" 
 
 					m.Group = IIF(m.ReplaceChar == "&", 1, VAL(m.ReplaceChar))
 
+					* and also inside the range of the actual subject string
 					IF m.Group <= This.Groups
-						m.NewReplacedString = m.NewReplacedString + NVL(m.Match.SubMatches.Item(m.Group - 1), "")
+						m.SubMatch = m.Match.SubMatches.Item(m.Group - IIF(m.Match.SubMatches.BaseClass == "Custom", 1, 0))
+						m.NewReplacedString = m.NewReplacedString + NVL(m.SubMatch, "")
 					ELSE
+						* when not, just let go the group reference into the final replaced string
 						m.NewReplacedString = m.NewReplacedString + "$" + m.ReplaceChar
 					ENDIF
 
-				ELSE
+				* $<name>
+				CASE m.ReplaceChar == "<" AND ">" $ SUBSTR(m.ReplacementString, m.ScanReplacement)
 
-					m.NewReplacedString = m.NewReplacedString + "$" + m.ReplaceChar
+					m.NamedGroup = STREXTRACT(SUBSTR(m.ReplacementString, m.ScanReplacement), "<", ">", 1)
 
-				ENDIF
+					* check if there is a named group as indicated in the replacement string
+					IF This.NamedMatches.GetKey(m.NamedGroup) != 0
+						m.SubMatch = This.NamedMatches(m.NamedGroup)
+						* when that's the case, replace it
+						m.NewReplacedString = m.NewReplacedString + NVL(m.SubMatch, "")
+					ELSE
+						* or leave it as it is
+						m.NewReplacedString = m.NewReplacedString + "$<" + m.NamedGroup + ">"
+					ENDIF
+
+					m.ScanReplacement = m.ScanReplacement + LEN(m.NamedGroup) + 1
+
+				* in other cases, just ignore the $ (to insert a $ in the replaced string, use $$)
+				OTHERWISE
+
+					m.NewReplacedString = m.NewReplacedString + m.ReplaceChar
+
+				ENDCASE
 
 			ELSE
 
@@ -503,6 +552,48 @@ DEFINE CLASS VFP_RegExp AS Custom
 		ENDFOR
 
 		RETURN m.Match
+
+	ENDFUNC
+
+	* record a named match
+	HIDDEN FUNCTION NamedMatchRecorder (Subject AS String, Vector AS Integer, NamedGroups AS Integer, NameTable AS Integer, NameEntrySize AS Integer) AS Void
+
+		LOCAL TablePtr AS Integer
+		LOCAL Start AS Integer, End AS Integer
+		LOCAL GroupIndex AS Integer
+		LOCAL GroupNumber AS Integer
+		LOCAL GroupName AS String
+
+		m.TablePtr = m.NameTable
+
+		* info on named capture groups (if any)
+		FOR m.GroupIndex = 1 TO m.NamedGroups
+
+			* the group number leads the name table
+			m.GroupNumber = This.ReadInt16(m.TablePtr)
+
+			* followed by the name of the capturing group
+			m.GroupName = This.ReadCString(m.TablePtr + 2, m.NameEntrySize - 3)
+
+			* always store the last occurence of the match
+			IF This.NamedMatches.GetKey(m.GroupName) != 0
+				This.NamedMatches.Remove(m.GroupName)
+			ENDIF
+
+			* fetch the name from the subject string
+			m.Start = This.ReadInt(m.Vector + 8 * m.GroupNumber)
+			m.End = This.ReadInt(m.Vector + 8 * m.GroupNumber + 4)
+
+			IF m.Start != -1
+				This.NamedMatches.Add(SUBSTR(m.Subject, m.Start + 1, m.End - m.Start), m.GroupName)
+			ELSE
+				This.NamedMatches.Add(CAST(.NULL. AS Character), m.GroupName)
+			ENDIF
+
+			* go to the next entry
+			m.TablePtr = m.TablePtr + m.NameEntrySize
+
+		ENDFOR
 
 	ENDFUNC
 
@@ -553,6 +644,18 @@ DEFINE CLASS VFP_RegExp AS Custom
 	HIDDEN FUNCTION ReadInt (MemoryLocation AS Integer) AS Integer
 
 		RETURN CTOBIN(SYS(2600, m.MemoryLocation, 4), AS_DWORD)
+
+	ENDFUNC
+
+	HIDDEN FUNCTION ReadInt16 (MemoryLocation AS Integer) AS Integer
+
+		RETURN CTOBIN(SYS(2600, m.MemoryLocation, 2), AS_WORDHL)
+
+	ENDFUNC
+
+	HIDDEN FUNCTION ReadCString (MemoryLocation AS Integer, MaxLength AS Integer) AS String
+
+		RETURN TRIM(GETWORDNUM(SYS(2600, m.MemoryLocation, m.MaxLength) + 0h00, 1, 0h00), 0, 0h00)
 
 	ENDFUNC
 
@@ -752,7 +855,7 @@ DEFINE CLASS RegExp_SubMatchCollection2 AS Collection
 
 		ENDWITH
 
-		This.Add(m.SubMatch)
+		This.Add(m.Value)
 
 		RETURN m.SubMatch
 
