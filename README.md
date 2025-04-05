@@ -8,7 +8,7 @@ Besides lacking more recent and advanced features, Microsoft's announcement of V
 
 VFP_RegExp relies on the PCRE2 library as its engine and exposes the same properties and methods as the VBScript engine. Thus, it facilitates migration from the current code while gaining access to many advanced capabilities of PCRE.
 
-In future work, VFP_RegExp will incorporate other PCRE features (like identifying the matched value of named groups, for instance) without compromising compatibility with the VBScript object.
+Other main goal of VFP_RegExp is to incorporate other PCRE features (like identifying the matched value of named groups, for instance) without compromising compatibility with the VBScript object.
 
 Information on the VBScript.RegExp Object:
 - [@ Microsoft](https://learn.microsoft.com/en-us/previous-versions/yab2dx62(v=vs.85))
@@ -34,7 +34,7 @@ Refer to the respective documentation for those marked as `VBS` or `PCRE`.
 |IgnoreCase|VBS|L| |
 |MatchCollectionBaseClass|VFP|C|The base class of the RegExp collections, either "Custom" or "Collection"|
 |Multiline|VBS|L| |
-|NamedMatches|VFP|O|A collection of named capturing groups.|
+|NamedMatches|VFP|O|A collection of matches captured by named groups.|
 |NormalizeCRLF|VFP|L|Normalize newlines in a subject string changing them from LF or CR to CR+LF, before matching.|
 |RegExpEngine|VFP|C|Name and version of the PCRE2 library.|
 |Pattern|VBS|C| |
@@ -47,9 +47,11 @@ Refer to the respective documentation for those marked as `VBS` or `PCRE`.
 
 ## Methods
 
-The class exposes three methods that follow those available in VBScript.RegExp (`Execute()`, `Test()`, and `Replace()`), and offers additional ones to deal with extensions to the VBScript model.
+The class exposes the three methods available in VBScript.RegExp (`Execute()`, `Test()`, and `Replace()`), and offers additional ones to deal with extensions to the VBScript model.
 
-### `.Execute(SubjectString AS String) AS RegExp_MatchCollection`
+### VBScript-like methods
+
+#### `.Execute(SubjectString AS String) AS RegExp_MatchCollection`
 
 Matches a subject string against the pattern and returns a collection of matches of the `RegExp_Match` type, organized under a `RegExp_MatchCollection` object.
 
@@ -61,9 +63,9 @@ The properties and methods of these objects are the same as those found in the c
 
 In case there are named groups in the pattern string, the `NamedMatches` collection addresses the set of those named groups.
 
-For instance, executing a subject string `"3.14"` against the pattern `"^(?<integer>\d+(?<fractional>\.[\d]+)?)$"` will set a two-member collection, in which `.NamedMatches("integer")` returns `"3"`, `.NamedMatches("fractional")` returns `".14"`, `.NamedMatches.Count` returns `2`, and `.NamedMatches.GetKey(1)` returns `"integer"`.
+For instance, executing a subject string `"3.14"` against the pattern `"^(?<integer>\d+(?<fractional>\.[\d]+)?)$"` will set a two-member collection, of which `.NamedMatches("integer")` returns `"3"`, `.NamedMatches("fractional")` returns `".14"`, `.NamedMatches.Count` returns `2`, and `.NamedMatches.GetKey(1)` returns `"integer"`.
 
-### `.Replace(SubjectString AS String, Replacement AS String) AS String`
+#### `.Replace(SubjectString AS String, Replacement AS String) AS String`
 
 Replaces a subject string with a replacement string pattern, which may hold references to the capturing groups in the regular expression (as supported by the VBScript object).
 
@@ -71,11 +73,13 @@ For instance, if the regular expression has two sequential capturing groups, the
 
 The method can also deal with named groups, referenced as `$<name>`.
 
-### `.Test(SubjectString AS String) AS Logical`
+#### `.Test(SubjectString AS String) AS Logical`
 
 Tests a subject string against the pattern and returns `.T.` if it matches, in whole or partially, or `.F.`, otherwise.
 
-### `.Validate() AS Logical`
+### Other methods
+
+#### `.Validate() AS Logical`
 
 Validates the pattern string.
 
@@ -122,7 +126,7 @@ WITH CREATEOBJECT("VFP_RegExp") AS VFP_RegExp
 ENDWITH
 ```
 
-It's possible to base the RegExp collection classes (`RegExp_MatchCollection` and `RegExp_SubMatchCollection`) on the VFP `Collection` object instead of `Custom`. This will lead to three differences in how the results are treated: references to the member of the collections are 1-based; the `Item()` method can be chained; and the collections can be iterated through their members.
+It's possible to base the RegExp collection classes (`RegExp_MatchCollection` and `RegExp_SubMatchCollection`) on the VFP `Collection` object instead of `Custom`. This will lead to three differences in how the results are treated: references to the member of the collections are 1-based; the `Item()` method of `RegExp_MatchCollection` can be chained; and the collections can be iterated through their members.
 
 ```foxpro
 LOCAL RX AS VFP_RegExp
@@ -147,13 +151,17 @@ ENDFOR
 
 ## Dependencies
 
-The class requires a PCRE2 8-bit DLL (where 8-bit refers to the size of a character). For convenience, an already-built DLL is available in the source folder, but you can use any other that may be present in your system. Before use, read the accompanying license document.
+The class requires a PCRE2 8-bit DLL (where 8-bit refers to the size of a character).
+
+For convenience, an already-built DLL is available in the source folder, but you can use any other that may be present in your system. Before use, read the accompanying license document.
+
+Distributed PCRE2 version: 10.45.
 
 ## Licensing and acknowledgments
 
-[Unlicensed](UNLICENSE.md "Unlicense").
+The VFP class is [unlicensed](UNLICENSE.md "Unlicense").
 
-**PCRE2 Basic Library Functions** by Philip Hazel, copyright (c) 1997-2024 University of Cambridge, distributed under a [BSD license](PCRE2_LICENCE "BSD License").
+**PCRE2 Basic Library Functions** by Philip Hazel, copyright (c) 1997-2025 University of Cambridge, distributed under a [BSD license](PCRE2_LICENCE.md "BSD License"), with exceptions.
 
 DLL built using the configuration / VS solution in [pcre2-win-build](https://github.com/kiyolee/pcre2-win-build "PCRE2 Windows Build"), by Kelvin Lee.
 
