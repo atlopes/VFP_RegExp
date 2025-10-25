@@ -62,7 +62,7 @@ CREATEOBJECT("RegExp_Library")
 
 DEFINE CLASS VFP_RegExp AS Custom
 
-	Version = 1.03
+	Version = 1.04
 	RegExpEngine = ""
 	MatchCollectionBaseClass = "Custom"
 
@@ -206,6 +206,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 		LOCAL StartMatch AS Integer, EndMatch AS Integer
 		LOCAL Offset AS Integer
+		LOCAL LastMatch AS Integer
 
 		LOCAL Group AS Integer
 
@@ -227,6 +228,9 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 		* let's not run in an infinite loop
 		m.SafetyValve = This.SafetyValve
+
+		* no last match, for now
+		m.LastMatch = 0
 
 		TRY
 
@@ -300,11 +304,6 @@ DEFINE CLASS VFP_RegExp AS Custom
 						m.StartMatch = This.ReadInt(m.MatchVector)
 						m.EndMatch = This.ReadInt(m.MatchVector + 4)
 
-						* if in replace mode, begin to fetch the start of the string that did not match (it may be empty)
-						IF m.Operation == VFP_REG_REPLACE
-							m.Replaced = LEFT(m.SubjectString, m.StartMatch)
-						ENDIF
-
 						* store the info on the first match, overall string
 						m.Match = This.MatchRecorder(m.RunningMatches, m.SubjectString, m.MatchVector, m.ResultCode)
 
@@ -315,7 +314,8 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 						* replace what was matched, if we are in replace mode
 						IF m.Operation == VFP_REG_REPLACE
-							m.Replaced = This.Replacer(m.Replaced, m.Replacement, m.Match)
+							m.Replaced = This.Replacer(LEFT(m.SubjectString, m.StartMatch), m.Replacement, m.Match)
+							m.LastMatch = m.EndMatch
 						ENDIF
 
 						* when global, continue beyond the first match
@@ -330,7 +330,7 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 								m.MatchOptions = 0
 
-								* where are we, while matching the subject string
+								* where are we, while matching the subject string (redundant, most of the time)
 								m.StartMatch = This.ReadInt(m.MatchVector)
 								m.EndMatch = This.ReadInt(m.MatchVector + 4)
 								m.Offset = m.EndMatch
@@ -394,8 +394,15 @@ DEFINE CLASS VFP_RegExp AS Custom
 									This.NamedMatchRecorder(m.SubjectString, m.MatchVector, m.NamedGroups, m.NameTable, m.NameEntrySize)
 								ENDIF
 
+								m.StartMatch = This.ReadInt(m.MatchVector)
+								m.EndMatch = This.ReadInt(m.MatchVector + 4)
+
 								IF m.Operation == VFP_REG_REPLACE
+									* add non-matched substring since last replacement to the final replaced string
+									m.Replaced = m.Replaced + SUBSTR(m.SubjectString, m.LastMatch + 1, m.StartMatch - m.LastMatch)
+									* and proceed to the replacement
 									m.Replaced = This.Replacer(m.Replaced, m.Replacement, m.Match)
+									m.LastMatch = m.EndMatch
 								ENDIF
 
 							ENDDO
@@ -420,6 +427,9 @@ DEFINE CLASS VFP_RegExp AS Custom
 
 			* something went wrong
 			SET STEP ON
+			This.RegExpError = m.Ops.ErrorNo
+			This.RegExpErrorMessage = m.Ops.Message
+			This.RegExpErrorLocation = m.Ops.LineContents + " &" + "&" + " at line " + LTRIM(STR(m.Ops.LineNo))
 			
 		FINALLY
 
@@ -439,6 +449,8 @@ DEFINE CLASS VFP_RegExp AS Custom
 		CASE m.Operation == VFP_REG_EXEC
 			RETURN m.RunningMatches
 		CASE m.Operation == VFP_REG_REPLACE
+			* before leaving, fetch the part of the string past last match
+			m.Replaced = m.Replaced + SUBSTR(m.SubjectString, m.LastMatch + 1)
 			RETURN m.Replaced
 		CASE m.Operation == VFP_REG_VALIDATE
 			RETURN m.Validated

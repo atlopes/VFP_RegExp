@@ -38,8 +38,8 @@ Refer to the respective documentation for those marked as `VBS` or `PCRE`.
 |NormalizeCRLF|VFP|L|Normalize newlines in a subject string changing them from LF or CR to CR+LF, before matching.|
 |RegExpEngine|VFP|C|Name and version of the PCRE2 library.|
 |Pattern|VBS|C| |
-|RegExpError|VFP|N|Error code found during an PCRE2 operation.|
-|RegExpErrorLocation|VFP|C|Where in the pattern a syntactic error was located.|
+|RegExpError|VFP|N|Error code found during an PCRE2 operation (negative numbers), or during VFP execution (positive numbers).|
+|RegExpErrorLocation|VFP|C|Where in the pattern a syntactic error was located, or where in the code an execution error occurred.|
 |RegExpErrorMessage|VFP|C|A message corresponding to the error code.|
 |SafetyValve|VFP|N|Set to something greater than zero to prevent infinite or large loops in the matching process.|
 |Ungreedy|PCRE|L| |
@@ -148,6 +148,8 @@ FOR EACH m.Match AS RegExp_Match IN m.Matches
 
 ENDFOR
 ```
+
+Check also the demo folder for examples on using the class.
 
 ## Dependencies
 
