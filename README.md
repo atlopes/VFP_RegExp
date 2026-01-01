@@ -126,7 +126,11 @@ WITH CREATEOBJECT("VFP_RegExp") AS VFP_RegExp
 ENDWITH
 ```
 
-It's possible to base the RegExp collection classes (`RegExp_MatchCollection` and `RegExp_SubMatchCollection`) on the VFP `Collection` object instead of `Custom`. This will lead to three differences in how the results are treated: references to the member of the collections are 1-based; the `Item()` method of `RegExp_MatchCollection` can be chained; and the collections can be iterated through their members.
+It's possible to base the RegExp collection classes (`RegExp_MatchCollection` and `RegExp_SubMatchCollection`) on the VFP `Collection` object instead of `Custom`. This will lead to three differences in how the results are treated:
+
+* references to the member of the collections are 1-based;
+* the `Item()` method of `RegExp_MatchCollection` can be chained;
+* and the collections can be iterated through their members.
 
 ```foxpro
 LOCAL RX AS VFP_RegExp
@@ -157,13 +161,13 @@ The class requires a PCRE2 8-bit DLL (where 8-bit refers to the size of a charac
 
 For convenience, an already-built DLL is available in the source folder, but you can use any other that may be present in your system. Before use, read the accompanying license document.
 
-Distributed PCRE2 version: 10.45.
+Distributed PCRE2 version: 10.47.
 
 ## Licensing and acknowledgments
 
 The VFP class is [unlicensed](UNLICENSE.md "Unlicense").
 
-**PCRE2 Basic Library Functions** by Philip Hazel, copyright (c) 1997-2025 University of Cambridge, distributed under a [BSD license](PCRE2_LICENCE.md "BSD License"), with exceptions.
+**PCRE2 Basic Library Functions** by Philip Hazel, copyright (c) 1997-2007 University of Cambridge and 2007-2026 Philip Hazel, distributed under a [BSD license](PCRE2_LICENCE.md "BSD License"), with exceptions.
 
 DLL built using the configuration / VS solution in [pcre2-win-build](https://github.com/kiyolee/pcre2-win-build "PCRE2 Windows Build"), by Kelvin Lee.
 
